@@ -1,11 +1,44 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../utils/api'
+import TaskDetailModal from './TaskDetailModal'
 
-function ActionTriage({ actions, activeFilter, onFilterChange, draftActions }) {
+function ActionTriage({ actions, activeFilter, onFilterChange, draftActions, meetingId, onUpdate, meetingOwnerId }) {
   const [showDrafts, setShowDrafts] = useState(false)
   const navigate = useNavigate()
   const [ownerUserIds, setOwnerUserIds] = useState({})
+  const [selectedTask, setSelectedTask] = useState(null)
+
+  // Helper function to check if a task is blocked (has incomplete dependencies)
+  const isTaskBlocked = (action) => {
+    if (!action.dependencies || action.dependencies.length === 0) {
+      return false
+    }
+    
+    // Get all completed action IDs
+    const completedIds = new Set(
+      actions
+        .filter(a => a.status === 'complete')
+        .map(a => a.id)
+    )
+    
+    // Check if all dependencies are completed
+    return !action.dependencies.every(depId => completedIds.has(depId))
+  }
+
+  // Helper function to get dependency descriptions
+  const getDependencyDescriptions = (action) => {
+    if (!action.dependencies || action.dependencies.length === 0) {
+      return []
+    }
+    
+    return action.dependencies
+      .map(depId => {
+        const depAction = actions.find(a => a.id === depId)
+        return depAction ? { id: depId, description: depAction.description, completed: depAction?.status === 'complete' } : { id: depId, description: `Task ${depId}`, completed: false }
+      })
+      .filter(Boolean)
+  }
 
   // Helper function to check if a name looks like a team name (not a person)
   const isLikelyTeamName = (name) => {
@@ -134,15 +167,27 @@ function ActionTriage({ actions, activeFilter, onFilterChange, draftActions }) {
               key={action.id}
               className={`action-item ${action.confidence.toLowerCase()}-confidence`}
             >
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
                 <div style={{ flex: 1 }}>
-                  <div style={{ marginBottom: '0.5rem' }}>
+                  <div style={{ marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                     <span className={`intent-badge intent-${action.intent.toLowerCase()}`}>
                       {action.intent}
                     </span>
                     <span className={`confidence-badge confidence-${action.confidence.toLowerCase()}`}>
                       {action.confidence}
                     </span>
+                    {isTaskBlocked(action) && action.status !== 'complete' && (
+                      <span style={{ 
+                        fontSize: '0.7rem', 
+                        color: '#ef4444', 
+                        fontWeight: 'bold',
+                        padding: '0.2rem 0.4rem',
+                        background: '#fee2e2',
+                        borderRadius: '4px'
+                      }}>
+                        ⚠️ Blocked
+                      </span>
+                    )}
                   </div>
                   <p style={{ marginBottom: '0.5rem', fontWeight: 500 }}>
                     {action.description}
@@ -165,10 +210,40 @@ function ActionTriage({ actions, activeFilter, onFilterChange, draftActions }) {
                       </span>
                     )}
                   </div>
+                  {action.dependencies && action.dependencies.length > 0 && (
+                    <details style={{ marginTop: '0.5rem' }}>
+                      <summary style={{ fontSize: '0.85rem', color: '#667eea', cursor: 'pointer' }}>
+                        Dependencies ({action.dependencies.length})
+                      </summary>
+                      <div style={{ marginTop: '0.25rem', fontSize: '0.85rem' }}>
+                        {getDependencyDescriptions(action).map((dep, idx) => (
+                          <div key={idx} style={{ 
+                            color: dep.completed ? '#10b981' : '#ef4444',
+                            marginTop: '0.25rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.25rem'
+                          }}>
+                            {dep.completed ? '✅' : '⏳'} {dep.description}
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  )}
                   {action.context && (
                     <p style={{ fontSize: '0.85rem', color: '#64748b', marginTop: '0.5rem', fontStyle: 'italic' }}>
                       Context: {action.context}
                     </p>
+                  )}
+                  {action.comments && action.comments.length > 0 && (
+                    <div style={{ marginTop: '0.5rem', fontSize: '0.85rem', color: '#64748b' }}>
+                      💬 {action.comments.length} comment{action.comments.length !== 1 ? 's' : ''}
+                    </div>
+                  )}
+                  {action.change_requests && action.change_requests.filter(cr => cr.status === 'pending').length > 0 && (
+                    <div style={{ marginTop: '0.25rem', fontSize: '0.85rem', color: '#f59e0b' }}>
+                      🔔 {action.change_requests.filter(cr => cr.status === 'pending').length} pending change request{action.change_requests.filter(cr => cr.status === 'pending').length !== 1 ? 's' : ''}
+                    </div>
                   )}
                   {action.source_line && (
                     <details style={{ marginTop: '0.5rem' }}>
@@ -180,12 +255,45 @@ function ActionTriage({ actions, activeFilter, onFilterChange, draftActions }) {
                       </p>
                     </details>
                   )}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setSelectedTask(action)
+                    }}
+                    style={{
+                      marginTop: '0.5rem',
+                      padding: '0.5rem 1rem',
+                      fontSize: '0.85rem',
+                      background: '#667eea',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    View Details & Add Comments
+                  </button>
                 </div>
               </div>
             </div>
           ))
         )}
       </div>
+      {selectedTask && meetingId && (
+        <TaskDetailModal
+          task={selectedTask}
+          meetingId={meetingId}
+          onClose={() => setSelectedTask(null)}
+          onUpdate={() => {
+            setSelectedTask(null)
+            if (onUpdate) {
+              onUpdate()
+            }
+          }}
+          allActions={actions}
+          meetingOwnerId={meetingOwnerId}
+        />
+      )}
     </div>
   )
 }

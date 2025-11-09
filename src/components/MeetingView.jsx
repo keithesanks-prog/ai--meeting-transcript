@@ -264,12 +264,15 @@ function MeetingView() {
       </div>
 
       {/* Action Triage Center */}
-      <ActionTriage
-        actions={filteredActions}
-        activeFilter={activeFilter}
-        onFilterChange={setActiveFilter}
-        draftActions={draftActions}
-      />
+          <ActionTriage 
+            actions={filteredActions} 
+            activeFilter={activeFilter}
+            onFilterChange={setActiveFilter}
+            draftActions={draftActions}
+            meetingId={id}
+            onUpdate={loadMeeting}
+            meetingOwnerId={meeting?.owner_id}
+          />
 
       {/* Kanban Board */}
       <div className="card">
@@ -277,11 +280,13 @@ function MeetingView() {
         <p style={{ color: '#64748b', marginBottom: '1rem', fontSize: '0.9rem' }}>
           High-confidence actions are automatically added to "To Do". Drag and drop to manage workflow.
         </p>
-        <KanbanBoard
-          actions={highConfidenceActions}
-          meetingId={id}
-          onUpdate={loadMeeting}
-        />
+          <KanbanBoard 
+            actions={highConfidenceActions} 
+            meetingId={id}
+            onUpdate={loadMeeting}
+            currentUser={user}
+            meetingOwnerId={meeting?.owner_id}
+          />
       </div>
 
       {/* Email Modal */}

@@ -22,6 +22,10 @@ ACTION_TRACKER_SCHEMA = {
                     "id": {"type": "string"},
                     "description": {"type": "string"},
                     "owner": {"type": "string"},
+                    "owner_id": {
+                        "type": ["string", "null"],
+                        "description": "Optional: Unique user ID if owner matches a registered user"
+                    },
                     "intent": {
                         "type": "string",
                         "enum": ["ACTION", "DECISION", "BLOCKER"]
@@ -32,7 +36,44 @@ ACTION_TRACKER_SCHEMA = {
                     },
                     "due_date": {"type": ["string", "null"]},
                     "context": {"type": "string"},
-                    "source_line": {"type": "string"}
+                    "source_line": {"type": "string"},
+                    "dependencies": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Array of action IDs that must be completed before this task can be started"
+                    },
+                    "comments": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string"},
+                                "user_id": {"type": "string"},
+                                "user_name": {"type": "string"},
+                                "text": {"type": "string"},
+                                "created_at": {"type": "string"}
+                            }
+                        },
+                        "description": "Array of comments on this task"
+                    },
+                    "change_requests": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string"},
+                                "user_id": {"type": "string"},
+                                "user_name": {"type": "string"},
+                                "request": {"type": "string"},
+                                "status": {
+                                    "type": "string",
+                                    "enum": ["pending", "approved", "rejected"]
+                                },
+                                "created_at": {"type": "string"}
+                            }
+                        },
+                        "description": "Array of change requests for this task"
+                    }
                 },
                 "required": ["id", "description", "owner", "intent", "confidence"]
             }

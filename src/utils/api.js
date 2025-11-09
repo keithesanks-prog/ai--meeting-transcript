@@ -196,6 +196,31 @@ export const api = {
   getMetrics: async () => {
     const response = await apiClient.get('/metrics')
     return response.data
+  },
+
+  // Task comments and change requests
+  addComment: async (meetingId, actionId, text) => {
+    const response = await apiClient.post(
+      `/meetings/${meetingId}/actions/${actionId}/comments`,
+      { text }
+    )
+    return response.data
+  },
+
+  addChangeRequest: async (meetingId, actionId, request) => {
+    const response = await apiClient.post(
+      `/meetings/${meetingId}/actions/${actionId}/change-requests`,
+      { request }
+    )
+    return response.data
+  },
+
+  updateChangeRequestStatus: async (meetingId, actionId, requestId, status) => {
+    const response = await apiClient.patch(
+      `/meetings/${meetingId}/actions/${actionId}/change-requests/${requestId}`,
+      { status }
+    )
+    return response.data
   }
 }
 

@@ -135,6 +135,83 @@ def get_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def find_user_by_name_or_context(owner_name: str, transcript_context: str = None) -> Optional[Dict[str, Any]]:
+    """
+    Find a user by name, with intelligent matching to handle name collisions.
+    Uses full name, email, role, and context for disambiguation.
+    
+    Args:
+        owner_name: The name extracted from the transcript
+        transcript_context: Optional context from the transcript (e.g., role mentions)
+        
+    Returns:
+        User dict with 'id' and 'name' if found, None otherwise
+    """
+    if not owner_name or owner_name == 'UNASSIGNED':
+        return None
+    
+    users = load_users()
+    owner_lower = owner_name.lower().strip()
+    
+    # Extract potential role/context from owner_name (e.g., "John (Engineering)")
+    role_hint = None
+    if '(' in owner_name and ')' in owner_name:
+        role_hint = owner_name[owner_name.find('(')+1:owner_name.find(')')].lower()
+        owner_name = owner_name[:owner_name.find('(')].strip()
+        owner_lower = owner_name.lower().strip()
+    
+    # Try exact match first
+    for user_id, user_data in users.items():
+        user_name = user_data.get('name', '').strip()
+        if user_name.lower() == owner_lower:
+            return {'id': user_id, 'name': user_name, 'email': user_data.get('email'), 'role': user_data.get('role')}
+    
+    # Try full name match (if owner_name contains multiple words)
+    if ' ' in owner_name:
+        owner_parts = owner_name.split()
+        for user_id, user_data in users.items():
+            user_name = user_data.get('name', '').strip()
+            user_parts = user_name.split()
+            # Check if all parts match (order-independent)
+            if len(owner_parts) == len(user_parts) and all(
+                any(part.lower() == up.lower() for up in user_parts) 
+                for part in owner_parts
+            ):
+                # If role hint provided, prefer users with matching role
+                if role_hint:
+                    user_role = user_data.get('role', '').lower()
+                    if role_hint in user_role or user_role in role_hint:
+                        return {'id': user_id, 'name': user_name, 'email': user_data.get('email'), 'role': user_data.get('role')}
+                return {'id': user_id, 'name': user_name, 'email': user_data.get('email'), 'role': user_data.get('role')}
+    
+    # Try first name + role match (if role hint available)
+    if role_hint and ' ' in owner_name:
+        first_name = owner_name.split()[0].lower()
+        for user_id, user_data in users.items():
+            user_name = user_data.get('name', '').strip()
+            user_role = user_data.get('role', '').lower()
+            if user_name.lower().startswith(first_name) and (role_hint in user_role or user_role in role_hint):
+                return {'id': user_id, 'name': user_name, 'email': user_data.get('email'), 'role': user_data.get('role')}
+    
+    # Try email match (if owner_name looks like an email)
+    if '@' in owner_name:
+        for user_id, user_data in users.items():
+            user_email = user_data.get('email', '').lower()
+            if user_email == owner_lower:
+                return {'id': user_id, 'name': user_data.get('name'), 'email': user_data.get('email'), 'role': user_data.get('role')}
+    
+    # Try partial match (last resort)
+    for user_id, user_data in users.items():
+        user_name = user_data.get('name', '').lower()
+        # Check if owner_name is contained in user_name or vice versa
+        if owner_lower in user_name or user_name in owner_lower:
+            # Prefer exact first name match
+            if owner_lower.split()[0] == user_name.split()[0]:
+                return {'id': user_id, 'name': user_data.get('name'), 'email': user_data.get('email'), 'role': user_data.get('role')}
+    
+    return None
+
+
 def get_user_by_name(name: str) -> Optional[Dict[str, Any]]:
     """Get a user by name (case-insensitive)."""
     users = load_users()
@@ -273,20 +350,27 @@ def process_transcript_with_gemini(transcript: str) -> Dict[str, Any]:
         Structured JSON with actions, decisions, and blockers
     """
     try:
-        # Get list of available users for owner matching
+        # Get list of available users for owner matching with full details
         users = load_users()
-        user_names = [user_data.get('name') for user_data in users.values() if user_data.get('name')]
-        users_list = ', '.join(user_names) if user_names else 'None'
+        users_info = []
+        for user_id, user_data in users.items():
+            name = user_data.get('name', '')
+            email = user_data.get('email', '')
+            role = user_data.get('role', 'Other')
+            if name:
+                users_info.append(f"{name} ({role}) - {email}")
+        
+        users_list = '\n'.join(users_info) if users_info else 'None'
         
         # Format the prompt with user list
         base_prompt = format_prompt_with_transcript(transcript)
         prompt = f"""{base_prompt}
 
 ### IMPORTANT - Available Users:
-The following users exist in the system. When assigning owners, use EXACTLY these names (case-sensitive):
+The following users exist in the system. When assigning owners, use the FULL NAME exactly as shown:
 {users_list}
 
-If a person mentioned in the transcript matches one of these names, use that exact name. If no match is found, set owner to "UNASSIGNED".
+CRITICAL: If multiple people share the same first name, you MUST use their full name (e.g., "John Smith" not just "John") or include their role/email for disambiguation (e.g., "John Smith (Engineering)" or "john.smith@company.com"). Use the exact name format shown above. If no match is found, set owner to "UNASSIGNED".
 """
         
         # Initialize Gemini model - use gemini-2.5-flash (stable, fast, cost-effective)
@@ -335,22 +419,40 @@ If a person mentioned in the transcript matches one of these names, use that exa
                 if 'source_line' not in action:
                     action['source_line'] = ""
             
-            # Validate owner exists - if not, set to UNASSIGNED
+            # Match owner to user and store owner_id for unique identification
             owner = action.get('owner', 'UNASSIGNED')
-            if owner != 'UNASSIGNED' and not validate_owner_exists(owner):
-                # Try to find user by partial name match
-                users = load_users()
-                found_user = None
-                for user_id, user_data in users.items():
-                    user_name = user_data.get('name', '').lower()
-                    if owner.lower() in user_name or user_name in owner.lower():
-                        found_user = user_data.get('name')
-                        break
+            owner_id = None
+            
+            if owner != 'UNASSIGNED':
+                # Try to find matching user with intelligent matching
+                matched_user = find_user_by_name_or_context(owner, transcript)
                 
-                if found_user:
-                    action['owner'] = found_user
+                if matched_user:
+                    # Store both owner name (for display) and owner_id (for unique identification)
+                    action['owner'] = matched_user['name']  # Use canonical name from database
+                    action['owner_id'] = matched_user['id']  # Store unique ID
                 else:
-                    action['owner'] = 'UNASSIGNED'
+                    # No match found - keep owner name but no owner_id
+                    action['owner_id'] = None
+            else:
+                action['owner_id'] = None
+            
+            # Ensure dependencies field exists (default to empty array)
+            if 'dependencies' not in action:
+                action['dependencies'] = []
+            elif not isinstance(action['dependencies'], list):
+                action['dependencies'] = []
+            
+            # Initialize comments and change_requests arrays if not present
+            if 'comments' not in action:
+                action['comments'] = []
+            elif not isinstance(action['comments'], list):
+                action['comments'] = []
+            
+            if 'change_requests' not in action:
+                action['change_requests'] = []
+            elif not isinstance(action['change_requests'], list):
+                action['change_requests'] = []
         
         # Calculate summary if not present
         if 'summary' not in result:
@@ -643,15 +745,40 @@ def process_transcript():
 @app.route('/api/meetings', methods=['GET'])
 @require_auth
 def list_meetings():
-    """Get all meetings for the current user."""
+    """Get all meetings for the current user (owned by user or where user has tasks)."""
     user = get_current_user()
     meetings = load_meetings()
+    user_name = user.get('name', '')
+    user_email = user.get('email', '')
     
-    # Filter meetings by owner
-    user_meetings = [
-        meeting for meeting in meetings.values()
-        if meeting.get('owner_id') == user['id']
-    ]
+    # Filter meetings by:
+    # 1. Meeting owner, OR
+    # 2. User has tasks assigned to them in the meeting
+    user_meetings = []
+    for meeting in meetings.values():
+        is_owner = meeting.get('owner_id') == user['id']
+        
+        # Check if user has any tasks in this meeting
+        has_tasks = False
+        actions = meeting.get('actions', [])
+        for action in actions:
+            # Match by owner_id (preferred) or fallback to name/email matching
+            task_owner_id = action.get('owner_id')
+            task_owner = action.get('owner', '')
+            
+            if task_owner_id == user['id']:
+                has_tasks = True
+                break
+            # Fallback to name/email matching for backward compatibility
+            elif (task_owner == user_name or 
+                  task_owner == user_email or
+                  task_owner.lower() == user_name.lower() or
+                  task_owner.lower() == user_email.lower()):
+                has_tasks = True
+                break
+        
+        if is_owner or has_tasks:
+            user_meetings.append(meeting)
     
     return jsonify(user_meetings), 200
 
@@ -659,18 +786,41 @@ def list_meetings():
 @app.route('/api/meetings/<meeting_id>', methods=['GET'])
 @require_auth
 def get_meeting_by_id(meeting_id: str):
-    """Get a specific meeting by ID. Only accessible by the owner."""
+    """Get a specific meeting by ID. Accessible by the owner or users with assigned tasks."""
     user = get_current_user()
     meeting = get_meeting(meeting_id)
     
     if not meeting:
         return jsonify({"error": "Meeting not found"}), 404
     
-    # Check ownership
-    if meeting.get('owner_id') != user['id']:
-        return jsonify({"error": "Access denied"}), 403
+    # Check if user is meeting owner
+    is_owner = meeting.get('owner_id') == user['id']
+    if is_owner:
+        return jsonify(meeting), 200
     
-    return jsonify(meeting), 200
+    # Check if user has tasks assigned to them in this meeting
+    user_name = user.get('name', '')
+    user_email = user.get('email', '')
+    actions = meeting.get('actions', [])
+    
+    for action in actions:
+        # Match by owner_id (preferred) or fallback to name/email matching
+        task_owner_id = action.get('owner_id')
+        task_owner = action.get('owner', '')
+        
+        if task_owner_id == user['id']:
+            # User has tasks in this meeting, allow access
+            return jsonify(meeting), 200
+        # Fallback to name/email matching for backward compatibility
+        elif (task_owner == user_name or 
+              task_owner == user_email or
+              task_owner.lower() == user_name.lower() or
+              task_owner.lower() == user_email.lower()):
+            # User has tasks in this meeting, allow access
+            return jsonify(meeting), 200
+    
+    # User is neither owner nor has tasks
+    return jsonify({"error": "Access denied"}), 403
 
 
 @app.route('/api/meetings/<meeting_id>', methods=['DELETE'])
@@ -716,10 +866,6 @@ def update_action(meeting_id: str, action_id: str):
     if not meeting:
         return jsonify({"error": "Meeting not found"}), 404
     
-    # Check meeting ownership
-    if meeting.get('owner_id') != user['id']:
-        return jsonify({"error": "Access denied"}), 403
-    
     data = request.json
     actions = meeting.get('actions', [])
     
@@ -734,22 +880,25 @@ def update_action(meeting_id: str, action_id: str):
         return jsonify({"error": "Action not found"}), 404
     
     # Check if user is the task owner
+    task_owner_id = action.get('owner_id')
     task_owner = action.get('owner', '')
     user_name = user.get('name', '')
     user_email = user.get('email', '')
     
-    # Allow update if:
-    # 1. User is the meeting owner (can update any task), OR
-    # 2. User is the task owner (can update their own tasks)
-    is_meeting_owner = meeting.get('owner_id') == user['id']
-    is_task_owner = (
-        task_owner == user_name or
-        task_owner == user_email or
-        task_owner.lower() == user_name.lower() or
-        task_owner.lower() == user_email.lower()
-    )
+    # Only the task owner can update their own tasks (use owner_id for unique identification)
+    is_task_owner = False
     
-    if not (is_meeting_owner or is_task_owner):
+    # Primary check: match by owner_id (most reliable)
+    if task_owner_id == user['id']:
+        is_task_owner = True
+    # Fallback: match by name/email (for backward compatibility with old data)
+    elif (task_owner == user_name or
+          task_owner == user_email or
+          task_owner.lower() == user_name.lower() or
+          task_owner.lower() == user_email.lower()):
+        is_task_owner = True
+    
+    if not is_task_owner:
         return jsonify({
             "error": "You can only update tasks assigned to you",
             "task_owner": task_owner,
@@ -761,6 +910,157 @@ def update_action(meeting_id: str, action_id: str):
     save_meeting(meeting_id, meeting)
     
     return jsonify(action), 200
+
+
+@app.route('/api/meetings/<meeting_id>/actions/<action_id>/comments', methods=['POST'])
+@require_auth
+def add_comment(meeting_id: str, action_id: str):
+    """
+    Add a comment to a task.
+    Any authenticated user can comment on any task.
+    """
+    user = get_current_user()
+    meeting = get_meeting(meeting_id)
+    
+    if not meeting:
+        return jsonify({"error": "Meeting not found"}), 404
+    
+    data = request.json
+    comment_text = data.get('text', '').strip()
+    
+    if not comment_text:
+        return jsonify({"error": "Comment text is required"}), 400
+    
+    actions = meeting.get('actions', [])
+    action = None
+    for a in actions:
+        if a.get('id') == action_id:
+            action = a
+            break
+    
+    if not action:
+        return jsonify({"error": "Action not found"}), 404
+    
+    # Initialize comments array if not present
+    if 'comments' not in action:
+        action['comments'] = []
+    
+    # Create new comment
+    comment = {
+        'id': str(uuid.uuid4()),
+        'user_id': user['id'],
+        'user_name': user.get('name', user.get('email', 'Unknown')),
+        'text': comment_text,
+        'created_at': datetime.now().isoformat()
+    }
+    
+    action['comments'].append(comment)
+    save_meeting(meeting_id, meeting)
+    
+    return jsonify(comment), 201
+
+
+@app.route('/api/meetings/<meeting_id>/actions/<action_id>/change-requests', methods=['POST'])
+@require_auth
+def add_change_request(meeting_id: str, action_id: str):
+    """
+    Add a change request to a task.
+    Any authenticated user can request changes to any task.
+    """
+    user = get_current_user()
+    meeting = get_meeting(meeting_id)
+    
+    if not meeting:
+        return jsonify({"error": "Meeting not found"}), 404
+    
+    data = request.json
+    request_text = data.get('request', '').strip()
+    
+    if not request_text:
+        return jsonify({"error": "Change request text is required"}), 400
+    
+    actions = meeting.get('actions', [])
+    action = None
+    for a in actions:
+        if a.get('id') == action_id:
+            action = a
+            break
+    
+    if not action:
+        return jsonify({"error": "Action not found"}), 404
+    
+    # Initialize change_requests array if not present
+    if 'change_requests' not in action:
+        action['change_requests'] = []
+    
+    # Create new change request
+    change_request = {
+        'id': str(uuid.uuid4()),
+        'user_id': user['id'],
+        'user_name': user.get('name', user.get('email', 'Unknown')),
+        'request': request_text,
+        'status': 'pending',
+        'created_at': datetime.now().isoformat()
+    }
+    
+    action['change_requests'].append(change_request)
+    save_meeting(meeting_id, meeting)
+    
+    return jsonify(change_request), 201
+
+
+@app.route('/api/meetings/<meeting_id>/actions/<action_id>/change-requests/<request_id>', methods=['PATCH'])
+@require_auth
+def update_change_request_status(meeting_id: str, action_id: str, request_id: str):
+    """
+    Update the status of a change request (approve/reject).
+    Only the task owner or meeting owner can approve/reject change requests.
+    """
+    user = get_current_user()
+    meeting = get_meeting(meeting_id)
+    
+    if not meeting:
+        return jsonify({"error": "Meeting not found"}), 404
+    
+    data = request.json
+    new_status = data.get('status')
+    
+    if new_status not in ['approved', 'rejected']:
+        return jsonify({"error": "Status must be 'approved' or 'rejected'"}), 400
+    
+    actions = meeting.get('actions', [])
+    action = None
+    for a in actions:
+        if a.get('id') == action_id:
+            action = a
+            break
+    
+    if not action:
+        return jsonify({"error": "Action not found"}), 404
+    
+    # Check if user is task owner or meeting owner
+    task_owner_id = action.get('owner_id')
+    is_meeting_owner = meeting.get('owner_id') == user['id']
+    is_task_owner = task_owner_id == user['id'] if task_owner_id else False
+    
+    if not (is_meeting_owner or is_task_owner):
+        return jsonify({"error": "Only the task owner or meeting owner can approve/reject change requests"}), 403
+    
+    # Find and update the change request
+    change_requests = action.get('change_requests', [])
+    change_request = None
+    for cr in change_requests:
+        if cr.get('id') == request_id:
+            change_request = cr
+            break
+    
+    if not change_request:
+        return jsonify({"error": "Change request not found"}), 404
+    
+    change_request['status'] = new_status
+    save_meeting(meeting_id, meeting)
+    
+    return jsonify(change_request), 200
 
 
 @app.route('/api/meetings/<meeting_id>/export', methods=['GET'])
@@ -1161,9 +1461,20 @@ def get_user_tasks(user_id: str):
     for meeting_id, meeting in meetings.items():
         actions = meeting.get('actions', [])
         for action in actions:
-            # Match by name (case-insensitive)
-            owner = action.get('owner', '')
-            if owner.lower() == user_name.lower():
+            # Match by owner_id (preferred) or fallback to name matching
+            task_owner_id = action.get('owner_id')
+            task_owner = action.get('owner', '')
+            
+            if task_owner_id == user_id:
+                task_with_meeting = {
+                    **action,
+                    'meeting_id': meeting_id,
+                    'meeting_title': meeting.get('title', 'Untitled Meeting'),
+                    'meeting_date': meeting.get('processed_at')
+                }
+                user_tasks.append(task_with_meeting)
+            # Fallback to name matching for backward compatibility
+            elif task_owner.lower() == user_name.lower():
                 task_with_meeting = {
                     **action,
                     'meeting_id': meeting_id,
