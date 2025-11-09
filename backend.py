@@ -453,6 +453,10 @@ CRITICAL: If multiple people share the same first name, you MUST use their full 
                 action['change_requests'] = []
             elif not isinstance(action['change_requests'], list):
                 action['change_requests'] = []
+            
+            # Initialize status field if not present (default to 'todo')
+            if 'status' not in action:
+                action['status'] = 'todo'
         
         # Calculate summary if not present
         if 'summary' not in result:
@@ -1584,26 +1588,59 @@ def get_completion_metrics():
     """
     Get completion metrics for the current user.
     Returns completion rates, task statistics, and trends.
+    Includes all meetings where the user has tasks assigned, not just meetings they own.
     """
     user = get_current_user()
     meetings = load_meetings()
-    
-    # Filter meetings by owner
-    user_meetings = [
-        meeting for meeting in meetings.values()
-        if meeting.get('owner_id') == user['id']
-    ]
-    
+    user_id = user['id']
     user_name = user.get('name', '').lower()
+    user_email = user.get('email', '').lower()
+    
+    # Filter meetings: include meetings owned by user OR where user has tasks assigned
+    # For admins, include ALL meetings
+    user_meetings = []
+    is_admin = user.get('role') == 'Admin'
+    
+    if is_admin:
+        # Admin sees all meetings
+        user_meetings = list(meetings.values())
+    else:
+        # Regular users see meetings they own or have tasks in
+        for meeting in meetings.values():
+            is_owner = meeting.get('owner_id') == user_id
+            
+            # Check if user has any tasks in this meeting
+            has_tasks = False
+            actions = meeting.get('actions', [])
+            for action in actions:
+                # Match by owner_id (preferred) or fallback to name/email matching
+                task_owner_id = action.get('owner_id')
+                task_owner = action.get('owner', '').lower()
+                
+                if task_owner_id == user_id:
+                    has_tasks = True
+                    break
+                # Fallback to name/email matching for backward compatibility
+                elif (task_owner == user_name or 
+                      task_owner == user_email):
+                    has_tasks = True
+                    break
+            
+            if is_owner or has_tasks:
+                user_meetings.append(meeting)
+    
     all_tasks = []
     
-    # Collect all tasks
-    for meeting in user_meetings:
-        actions = meeting.get('actions', [])
-        for action in actions:
-            if action.get('intent') == 'ACTION':
-                owner = action.get('owner', '').lower()
-                if owner == user_name or meeting.get('owner_id') == user['id']:
+    # For admins, include ALL tasks from ALL meetings
+    # For regular users, only include tasks assigned to them
+    is_admin = user.get('role') == 'Admin'
+    
+    if is_admin:
+        # Admin sees all tasks from all meetings
+        for meeting in meetings.values():
+            actions = meeting.get('actions', [])
+            for action in actions:
+                if action.get('intent') == 'ACTION':
                     task = {
                         **action,
                         'meeting_id': meeting.get('id'),
@@ -1611,6 +1648,35 @@ def get_completion_metrics():
                         'meeting_date': meeting.get('processed_at')
                     }
                     all_tasks.append(task)
+    else:
+        # Regular users only see their own tasks
+        for meeting in user_meetings:
+            actions = meeting.get('actions', [])
+            for action in actions:
+                if action.get('intent') == 'ACTION':
+                    # Match by owner_id (preferred) or fallback to name/email matching
+                    task_owner_id = action.get('owner_id')
+                    task_owner = action.get('owner', '').lower()
+                    
+                    # Only include tasks assigned to this user
+                    if task_owner_id == user_id:
+                        task = {
+                            **action,
+                            'meeting_id': meeting.get('id'),
+                            'meeting_title': meeting.get('title', 'Untitled Meeting'),
+                            'meeting_date': meeting.get('processed_at')
+                        }
+                        all_tasks.append(task)
+                    # Fallback to name/email matching for backward compatibility
+                    elif (task_owner == user_name or 
+                          task_owner == user_email):
+                        task = {
+                            **action,
+                            'meeting_id': meeting.get('id'),
+                            'meeting_title': meeting.get('title', 'Untitled Meeting'),
+                            'meeting_date': meeting.get('processed_at')
+                        }
+                        all_tasks.append(task)
     
     # Calculate metrics
     total_tasks = len(all_tasks)

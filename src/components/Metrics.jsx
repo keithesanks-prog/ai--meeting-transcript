@@ -16,6 +16,7 @@ function Metrics() {
     try {
       setLoading(true)
       const data = await api.getMetrics()
+      console.log('Metrics data:', data) // Debug log
       setMetrics(data)
     } catch (err) {
       console.error('Failed to load metrics:', err)
@@ -44,11 +45,15 @@ function Metrics() {
     )
   }
 
+  // Build status data - always include all three categories
   const statusData = [
-    { name: 'Completed', value: metrics.summary.completed, color: '#10b981' },
-    { name: 'In Progress', value: metrics.summary.in_progress, color: '#f59e0b' },
-    { name: 'To Do', value: metrics.summary.todo, color: '#64748b' }
+    { name: 'Completed', value: metrics.summary.completed || 0, color: '#10b981' },
+    { name: 'In Progress', value: metrics.summary.in_progress || 0, color: '#f59e0b' },
+    { name: 'To Do', value: metrics.summary.todo || 0, color: '#64748b' }
   ]
+  
+  const nonZeroStatusData = statusData.filter(item => item.value > 0)
+  console.log('Status data:', statusData, 'Non-zero:', nonZeroStatusData) // Debug log
 
   const intentData = [
     { name: 'Actions', value: metrics.by_intent.actions },
@@ -133,26 +138,73 @@ function Metrics() {
         {/* Status Distribution */}
         <div className="card">
           <h3 style={{ marginBottom: '1rem' }}>Task Status Distribution</h3>
-          <ResponsiveContainer width="100%" height={300}>
-            <PieChart>
-              <Pie
-                data={statusData}
-                cx="50%"
-                cy="50%"
-                labelLine={false}
-                label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                outerRadius={80}
-                fill="#8884d8"
-                dataKey="value"
-              >
-                {statusData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.color} />
-                ))}
-              </Pie>
-              <Tooltip />
-              <Legend />
-            </PieChart>
-          </ResponsiveContainer>
+          {metrics.summary.total_tasks === 0 ? (
+            <div style={{ padding: '2rem', textAlign: 'center', color: '#64748b', minHeight: '300px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+              <p>No tasks available</p>
+              <p style={{ fontSize: '0.9rem', marginTop: '0.5rem' }}>
+                Completed: {metrics.summary.completed || 0} | 
+                In Progress: {metrics.summary.in_progress || 0} | 
+                To Do: {metrics.summary.todo || 0}
+              </p>
+            </div>
+          ) : nonZeroStatusData.length === 0 ? (
+            <div style={{ padding: '2rem', textAlign: 'center', color: '#64748b', minHeight: '300px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+              <p>No status data to display</p>
+              <p style={{ fontSize: '0.9rem', marginTop: '0.5rem' }}>
+                Total Tasks: {metrics.summary.total_tasks}
+              </p>
+            </div>
+          ) : (
+            <div style={{ width: '100%', height: '300px', minHeight: '300px', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', overflow: 'visible' }}>
+              {nonZeroStatusData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart margin={{ top: 20, right: 30, bottom: 50, left: 30 }}>
+                    <Pie
+                      data={nonZeroStatusData}
+                      cx="50%"
+                      cy="50%"
+                      labelLine={false}
+                      label={false}
+                      outerRadius={80}
+                      fill="#8884d8"
+                      dataKey="value"
+                      isAnimationActive={true}
+                      paddingAngle={2}
+                    >
+                      {nonZeroStatusData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip 
+                      formatter={(value, name, props) => {
+                        const total = nonZeroStatusData.reduce((sum, item) => sum + item.value, 0)
+                        const percent = ((value / total) * 100).toFixed(0)
+                        return [`${value} (${percent}%)`, name]
+                      }}
+                    />
+                    <Legend 
+                      verticalAlign="bottom" 
+                      height={60}
+                      formatter={(value, entry) => {
+                        const item = nonZeroStatusData.find(d => d.name === value)
+                        const total = nonZeroStatusData.reduce((sum, d) => sum + d.value, 0)
+                        const percent = item ? ((item.value / total) * 100).toFixed(0) : '0'
+                        return `${value}: ${percent}%`
+                      }}
+                      wrapperStyle={{ paddingTop: '10px' }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <div style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>
+                  <p>Chart data is empty</p>
+                  <p style={{ fontSize: '0.9rem', marginTop: '0.5rem' }}>
+                    Status values: {JSON.stringify(statusData)}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Intent Distribution */}
