@@ -56,11 +56,19 @@ function Dashboard() {
     <div className="container">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
         <h2>Your Meetings</h2>
-        {user?.role === 'Admin' && (
-          <Link to="/upload" className="btn btn-primary">
-            + New Transcript
+        <div style={{ display: 'flex', gap: '1rem' }}>
+          <Link to="/calendar" className="btn btn-secondary" style={{ textDecoration: 'none' }}>
+            📅 Calendar
           </Link>
-        )}
+          <Link to="/metrics" className="btn btn-secondary" style={{ textDecoration: 'none' }}>
+            📊 Metrics
+          </Link>
+          {user?.role === 'Admin' && (
+            <Link to="/upload" className="btn btn-primary" style={{ textDecoration: 'none' }}>
+              + New Transcript
+            </Link>
+          )}
+        </div>
       </div>
 
       {meetings.length === 0 ? (

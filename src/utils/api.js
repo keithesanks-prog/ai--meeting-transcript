@@ -185,6 +185,17 @@ export const api = {
   getUserByName: async (name) => {
     const response = await apiClient.get(`/users/by-name/${encodeURIComponent(name)}`)
     return response.data
+  },
+
+  // Calendar and Metrics endpoints
+  getCalendarData: async () => {
+    const response = await apiClient.get('/calendar')
+    return response.data
+  },
+
+  getMetrics: async () => {
+    const response = await apiClient.get('/metrics')
+    return response.data
   }
 }
 

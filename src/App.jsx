@@ -6,6 +6,8 @@ import UploadTranscript from './components/UploadTranscript'
 import MeetingView from './components/MeetingView'
 import AdminPanel from './components/AdminPanel'
 import UserProfile from './components/UserProfile'
+import Calendar from './components/Calendar'
+import Metrics from './components/Metrics'
 import Login from './components/Login'
 import Signup from './components/Signup'
 import './styles/index.css'
@@ -131,6 +133,12 @@ function AppHeader() {
                 + New Transcript
               </Link>
             )}
+            <Link to="/calendar" className="btn btn-secondary" style={{ textDecoration: 'none' }}>
+              📅 Calendar
+            </Link>
+            <Link to="/metrics" className="btn btn-secondary" style={{ textDecoration: 'none' }}>
+              📊 Metrics
+            </Link>
             <button onClick={logout} className="btn btn-secondary">
               Logout
             </button>
@@ -200,6 +208,22 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <UserProfile />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/calendar"
+        element={
+          <ProtectedRoute>
+            <Calendar />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/metrics"
+        element={
+          <ProtectedRoute>
+            <Metrics />
           </ProtectedRoute>
         }
       />

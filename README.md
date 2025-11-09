@@ -48,6 +48,23 @@ The extracted items are then organized into a visual dashboard with filtering, w
 - **Source Verification**: View the original transcript quote for each action
 - **Status Tracking**: Visual workflow management
 
+### 📅 Calendar View
+- **Monthly Calendar**: Visual calendar showing all tasks with due dates and meetings
+- **Event Display**: See tasks and meetings organized by date
+- **Click to Navigate**: Click on calendar events to view meeting details
+- **Status Indicators**: Color-coded tasks by status (To Do, In Progress, Complete)
+- **Upcoming Events**: List view of upcoming tasks and meetings
+- **Date Navigation**: Navigate between months to view past and future events
+
+### 📊 Completion Metrics & Analytics
+- **Overall Completion Rate**: Track percentage of completed tasks with visual progress bar
+- **Status Distribution**: Visual breakdown of task statuses (pie chart)
+- **Intent Analysis**: See distribution of Actions, Decisions, and Blockers (bar chart)
+- **Confidence Levels**: Analyze tasks by confidence (HIGH, MEDIUM, LOW)
+- **Owner Performance**: Completion rates by owner/team with detailed breakdown
+- **Detailed Statistics**: Total tasks, meetings, and completion trends
+- **Performance Tracking**: Monitor team and individual productivity metrics
+
 ### 📤 Shareability & Export
 - **Shareable Links**: Generate read-only URLs for meeting summaries
 - **Export Formats**: 
@@ -233,6 +250,12 @@ npm run dev
 - **View Details**: Click on actions to see source quotes and context
 - **Filter by Owner**: Click on owner names in the Owner Wheel to filter
 
+### Calendar & Metrics
+
+- **View Calendar**: Navigate to Calendar page to see all tasks and meetings organized by date
+- **Track Completion**: View Metrics page for completion rates and analytics
+- **Monitor Performance**: See completion rates by owner, status distribution, and trends
+
 ### Sharing & Exporting
 
 - **Share Link**: Generate a read-only shareable URL
@@ -283,6 +306,10 @@ The following demo accounts are available (password: `password123`):
 - `GET /api/users/me/tasks` - Get current user's tasks
 - `GET /api/users/:id/tasks` - Get specific user's tasks (self or admin only)
 - `GET /api/users/by-name/:name` - Get user ID by name
+
+### Calendar & Metrics Endpoints (Requires Authentication)
+- `GET /api/calendar` - Get calendar data (tasks with due dates and meetings)
+- `GET /api/metrics` - Get completion metrics and analytics
 
 ## 📊 Data Structure
 

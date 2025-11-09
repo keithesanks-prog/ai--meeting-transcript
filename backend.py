@@ -1211,6 +1211,166 @@ def get_user_by_name_endpoint(name: str):
     }), 200
 
 
+@app.route('/api/calendar', methods=['GET'])
+@require_auth
+def get_calendar_data():
+    """
+    Get calendar data including tasks with due dates and meetings.
+    Returns tasks and meetings organized by date.
+    """
+    user = get_current_user()
+    meetings = load_meetings()
+    
+    # Filter meetings by owner
+    user_meetings = [
+        meeting for meeting in meetings.values()
+        if meeting.get('owner_id') == user['id']
+    ]
+    
+    calendar_events = []
+    user_name = user.get('name', '').lower()
+    
+    # Collect all tasks with due dates and meetings
+    for meeting in user_meetings:
+        meeting_date = meeting.get('processed_at', '')
+        if meeting_date:
+            calendar_events.append({
+                'type': 'meeting',
+                'id': meeting.get('id'),
+                'title': meeting.get('title', 'Untitled Meeting'),
+                'date': meeting_date,
+                'meeting_id': meeting.get('id')
+            })
+        
+        # Get tasks assigned to this user
+        actions = meeting.get('actions', [])
+        for action in actions:
+            if action.get('intent') == 'ACTION':
+                owner = action.get('owner', '').lower()
+                if owner == user_name or meeting.get('owner_id') == user['id']:
+                    due_date = action.get('due_date')
+                    if due_date:
+                        calendar_events.append({
+                            'type': 'task',
+                            'id': action.get('id'),
+                            'title': action.get('description', ''),
+                            'date': due_date,
+                            'status': action.get('status', 'todo'),
+                            'owner': action.get('owner'),
+                            'meeting_id': meeting.get('id'),
+                            'meeting_title': meeting.get('title', 'Untitled Meeting')
+                        })
+    
+    return jsonify({
+        "events": calendar_events,
+        "count": len(calendar_events)
+    }), 200
+
+
+@app.route('/api/metrics', methods=['GET'])
+@require_auth
+def get_completion_metrics():
+    """
+    Get completion metrics for the current user.
+    Returns completion rates, task statistics, and trends.
+    """
+    user = get_current_user()
+    meetings = load_meetings()
+    
+    # Filter meetings by owner
+    user_meetings = [
+        meeting for meeting in meetings.values()
+        if meeting.get('owner_id') == user['id']
+    ]
+    
+    user_name = user.get('name', '').lower()
+    all_tasks = []
+    
+    # Collect all tasks
+    for meeting in user_meetings:
+        actions = meeting.get('actions', [])
+        for action in actions:
+            if action.get('intent') == 'ACTION':
+                owner = action.get('owner', '').lower()
+                if owner == user_name or meeting.get('owner_id') == user['id']:
+                    task = {
+                        **action,
+                        'meeting_id': meeting.get('id'),
+                        'meeting_title': meeting.get('title', 'Untitled Meeting'),
+                        'meeting_date': meeting.get('processed_at')
+                    }
+                    all_tasks.append(task)
+    
+    # Calculate metrics
+    total_tasks = len(all_tasks)
+    completed_tasks = len([t for t in all_tasks if t.get('status') == 'complete'])
+    in_progress_tasks = len([t for t in all_tasks if t.get('status') == 'in_progress'])
+    todo_tasks = len([t for t in all_tasks if not t.get('status') or t.get('status') == 'todo'])
+    
+    completion_rate = (completed_tasks / total_tasks * 100) if total_tasks > 0 else 0
+    
+    # Tasks by intent
+    actions_count = len([t for t in all_tasks if t.get('intent') == 'ACTION'])
+    decisions_count = len([t for t in all_tasks if t.get('intent') == 'DECISION'])
+    blockers_count = len([t for t in all_tasks if t.get('intent') == 'BLOCKER'])
+    
+    # Tasks by confidence
+    high_confidence = len([t for t in all_tasks if t.get('confidence') == 'HIGH'])
+    medium_confidence = len([t for t in all_tasks if t.get('confidence') == 'MEDIUM'])
+    low_confidence = len([t for t in all_tasks if t.get('confidence') == 'LOW'])
+    
+    # Tasks by owner (for admins)
+    tasks_by_owner = {}
+    for task in all_tasks:
+        owner = task.get('owner', 'UNASSIGNED')
+        if owner not in tasks_by_owner:
+            tasks_by_owner[owner] = {'total': 0, 'completed': 0, 'in_progress': 0, 'todo': 0}
+        tasks_by_owner[owner]['total'] += 1
+        status = task.get('status', 'todo')
+        if status == 'complete':
+            tasks_by_owner[owner]['completed'] += 1
+        elif status == 'in_progress':
+            tasks_by_owner[owner]['in_progress'] += 1
+        else:
+            tasks_by_owner[owner]['todo'] += 1
+    
+    # Calculate completion rates per owner
+    owner_completion_rates = {}
+    for owner, stats in tasks_by_owner.items():
+        if stats['total'] > 0:
+            owner_completion_rates[owner] = {
+                **stats,
+                'completion_rate': (stats['completed'] / stats['total'] * 100)
+            }
+    
+    return jsonify({
+        "user": {
+            "id": user['id'],
+            "name": user.get('name'),
+            "email": user.get('email')
+        },
+        "summary": {
+            "total_tasks": total_tasks,
+            "completed": completed_tasks,
+            "in_progress": in_progress_tasks,
+            "todo": todo_tasks,
+            "completion_rate": round(completion_rate, 2)
+        },
+        "by_intent": {
+            "actions": actions_count,
+            "decisions": decisions_count,
+            "blockers": blockers_count
+        },
+        "by_confidence": {
+            "high": high_confidence,
+            "medium": medium_confidence,
+            "low": low_confidence
+        },
+        "by_owner": owner_completion_rates,
+        "meetings_count": len(user_meetings)
+    }), 200
+
+
 if __name__ == '__main__':
     ensure_data_dir()
     app.run(debug=True, port=5000)
